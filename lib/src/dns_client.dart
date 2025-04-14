@@ -17,24 +17,17 @@ abstract class DnsClient {
   /// Queries resource records for the given host. By default, returns IP addresses.
   /// For other record types (e.g., MX, TXT), the returned list will be empty since
   /// `lookup` only returns IP addresses. Use [lookupPacket] for full answers.
-  Future<List<IpAddress>> lookup(String name,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a});
+  Future<List<IpAddress>> lookup(String name, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a});
 
   /// Queries resource records for the given host and record type, returning the full DNS packet.
   /// This allows you to retrieve any DNS record (A, AAAA, CNAME, MX, TXT, etc.).
-  Future<DnsPacket> lookupPacket(String name,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a}) async {
+  Future<DnsPacket> lookupPacket(String name, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a}) async {
     // Default implementation tries IP-based lookup. Override in subclasses.
     final list = await lookup(name, type: type, recordType: recordType);
     final result = DnsPacket.withResponse();
     result.answers = list.map((ipAddress) {
-      final t = ipAddress is Ip4Address
-          ? DnsResourceRecord.typeIp4
-          : DnsResourceRecord.typeIp6;
-      return DnsResourceRecord.withAnswer(
-          name: name, type: t, data: ipAddress.toImmutableBytes());
+      final t = ipAddress is Ip4Address ? DnsResourceRecord.typeIp4 : DnsResourceRecord.typeIp6;
+      return DnsResourceRecord.withAnswer(name: name, type: t, data: ipAddress.toImmutableBytes());
     }).toList();
     return result;
   }
@@ -51,15 +44,13 @@ abstract class DnsClient {
       final recordType = question.type; // The actual DNS record type requested.
       switch (recordType) {
         case DnsRecordType.a:
-        // A record
-          return lookupPacket(question.name,
-              type: InternetAddressType.IPv4, recordType: recordType);
+          // A record
+          return lookupPacket(question.name, type: InternetAddressType.IPv4, recordType: recordType);
         case DnsRecordType.aaaa:
-        // AAAA record
-          return lookupPacket(question.name,
-              type: InternetAddressType.IPv6, recordType: recordType);
+          // AAAA record
+          return lookupPacket(question.name, type: InternetAddressType.IPv6, recordType: recordType);
         default:
-        // Attempt to handle other record types by directly querying them
+          // Attempt to handle other record types by directly querying them
           return lookupPacket(question.name, recordType: recordType);
       }
     }
@@ -95,9 +86,7 @@ abstract class DnsClient {
 /// Uses system DNS lookup method.
 class SystemDnsClient extends DnsClient {
   @override
-  Future<List<IpAddress>> lookup(String host,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a}) async {
+  Future<List<IpAddress>> lookup(String host, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a}) async {
     // The system lookup only supports A/AAAA lookups via InternetAddress.
     // If a non-IP record type is requested, return empty.
     if (recordType != DnsRecordType.a && recordType != DnsRecordType.aaaa) {
@@ -105,9 +94,7 @@ class SystemDnsClient extends DnsClient {
     }
 
     final addresses = await InternetAddress.lookup(host, type: type);
-    return addresses
-        .map((item) => IpAddress.fromBytes(item.rawAddress))
-        .toList();
+    return addresses.map((item) => IpAddress.fromBytes(item.rawAddress)).toList();
   }
 }
 
@@ -118,20 +105,24 @@ class SystemDnsClient extends DnsClient {
 ///   * [HttpDnsClient]
 abstract class PacketBasedDnsClient extends DnsClient {
   @override
-  Future<List<IpAddress>> lookup(String host,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a}) async {
+  Future<List<IpAddress>> lookup(String host, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a}) async {
     final packet = await lookupPacket(host, type: type, recordType: recordType);
     final result = <IpAddress>[];
 
+    final nameList = [host];
     // For non-IP record types, we can't produce IpAddresses directly.
     // We'll only parse Ip4/Ip6 answers.
     for (var answer in packet.answers) {
-      if (answer.name == host) {
-        if (answer.type == DnsResourceRecord.typeIp4 ||
-            answer.type == DnsResourceRecord.typeIp6) {
-          final ipAddress = IpAddress.fromBytes(answer.data);
-          result.add(ipAddress);
+      if (nameList.contains(answer.name)) {
+        switch (answer.type) {
+          case DnsResourceRecord.typeCanonicalName:
+            nameList.add(answer.dataAsHumanReadableString());
+            break;
+          case DnsResourceRecord.typeIp4:
+          case DnsResourceRecord.typeIp6:
+            final ipAddress = IpAddress.fromBytes(answer.data);
+            result.add(ipAddress);
+            break;
         }
       }
     }
@@ -140,9 +131,7 @@ abstract class PacketBasedDnsClient extends DnsClient {
   }
 
   @override
-  Future<DnsPacket> lookupPacket(String host,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a});
+  Future<DnsPacket> lookupPacket(String host, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a});
 }
 
 /// An exception that indicates failure by [DnsClient].
@@ -162,9 +151,7 @@ class DelegatingDnsClient implements DnsClient {
   DelegatingDnsClient(this.client);
 
   @override
-  Future<List<IpAddress>> lookup(String host,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a}) {
+  Future<List<IpAddress>> lookup(String host, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a}) {
     return client.lookup(host, type: type, recordType: recordType);
   }
 
@@ -174,9 +161,7 @@ class DelegatingDnsClient implements DnsClient {
   }
 
   @override
-  Future<DnsPacket> lookupPacket(String host,
-      {InternetAddressType type = InternetAddressType.any,
-        DnsRecordType recordType = DnsRecordType.a}) {
+  Future<DnsPacket> lookupPacket(String host, {InternetAddressType type = InternetAddressType.any, DnsRecordType recordType = DnsRecordType.a}) {
     return client.lookupPacket(host, type: type, recordType: recordType);
   }
 }

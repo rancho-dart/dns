@@ -48,6 +48,34 @@ void main() {
       expect(packet.answers[0].data, hasLength(greaterThan(1)));
     }, testOn: "vm");
 
+    test("lookupPacket('www.cctv.com')", () async {
+      final client = UdpDnsClient(
+        remoteAddress: InternetAddress('192.168.1.1'),
+      );
+      final packet = await client.lookupPacket('www.cctv.com');
+      for (var answer in packet.answers) {
+        print('Name: ${answer.name}, Type: ${answer.type}, Value: ${answer.dataAsHumanReadableString()}');
+      }
+
+      expect(packet, isNotNull);
+      expect(packet.isResponse, isTrue);
+      expect(packet.answers, hasLength(greaterThan(0)));
+      expect(packet.answers[0].name, 'www.cctv.com'); // The first answer is a CNAME record with compressed pointer
+      expect(packet.answers[0].type, DnsRecordType.cname.value);
+      expect(packet.answers[0].dataAsHumanReadableString(), 'www.cctv.com.wsglb0.com');
+    }, testOn: "vm");
+
+    test("lookup('www.cctv.com')", () async {
+      final client = UdpDnsClient(
+        remoteAddress: InternetAddress('192.168.1.1'),
+      );
+      final addresses = await client.lookup("www.cctv.com");
+      expect(addresses, hasLength(greaterThan(0)));
+      for (var address in addresses) {
+        print('Address: ${address.toString()}');
+      }
+    });
+
     test("lookup('google.com')", () async {
       final client = UdpDnsClient(
         remoteAddress: InternetAddress("8.8.8.8"),

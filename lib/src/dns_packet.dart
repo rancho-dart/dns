@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:convert';
+import 'dart:vmservice_io';
 
 import 'package:better_dart_ip/foundation.dart';
 import 'package:better_dart_ip/ip.dart';
@@ -20,8 +21,7 @@ import 'package:dart_raw/raw.dart';
 
 const Protocol dns = Protocol('DNS');
 
-void _writeDnsName(RawWriter writer, List<String> parts, int startIndex,
-    Map<String, int>? offsets) {
+void _writeDnsName(RawWriter writer, List<String> parts, int startIndex, Map<String, int>? offsets) {
   // Store pointer in the map
   if (offsets != null) {
     final key = parts.join('.');
@@ -80,8 +80,7 @@ List<String> _readDnsName(RawReader reader, int? startIndex) {
       // Calculate and validate index in the data
       final byte1 = reader.readUint8();
       final pointedIndex = startIndex + (((0x3F & length) << 8) | byte1);
-      if (pointedIndex > reader.bufferAsByteData.lengthInBytes ||
-          reader.bufferAsByteData.getUint8(pointedIndex) >= 64) {
+      if (pointedIndex > reader.bufferAsByteData.lengthInBytes || reader.bufferAsByteData.getUint8(pointedIndex) >= 64) {
         final index = reader.index - 2;
         throw StateError(
           'invalid pointer from index 0x${index.toRadixString(16)} (decimal: $index) to index 0x${pointedIndex.toRadixString(16)} ($pointedIndex)',
@@ -195,15 +194,13 @@ class DnsResourceRecord extends SelfCodec {
 
   DnsResourceRecord();
 
-  DnsResourceRecord.withAnswer(
-      {required String name, required this.type, required this.data}) {
+  DnsResourceRecord.withAnswer({required String name, required this.type, required this.data}) {
     this.name = name;
     ttl = 600;
   }
 
   @override
-  void encodeSelf(RawWriter writer,
-      { int startIndex = 0 , Map<String, int>? pointers}) {
+  void encodeSelf(RawWriter writer, {int startIndex = 0, Map<String, int>? pointers}) {
     // Write name
     // (a list of labels/pointers)
     _writeDnsName(
@@ -248,13 +245,30 @@ class DnsResourceRecord extends SelfCodec {
     final dataLength = reader.readUint16();
 
     // N-byte data
-    data = reader.readUint8ListViewOrCopy(dataLength);
+    // If type is CNAME/NS/PTR/MX/SRV, we need to decode
+    switch (type) {
+      case typeCanonicalName:
+      case typeNameServer:
+      case typeDomainNamePointer:
+      case typeMailServer:
+      case typeServerDiscovery:
+        // final oldIndex = reader.index;
+        // final pointedIndex = startIndex + reader.index;
+        // reader.index = pointedIndex;
+        final fullExpandedName = _readDnsName(reader, startIndex).join('.');
+        data = utf8.encode(fullExpandedName);
+        // reader.index = oldIndex;
+        break;
+      default:
+        data = reader.readUint8ListViewOrCopy(dataLength);
+        break;
+    }
   }
 
   String dataAsHumanReadableString() {
     switch (type) {
       case typeText:
-      // TXT records are a series of length-prefixed strings.
+        // TXT records are a series of length-prefixed strings.
         final bytes = data;
         int i = 0;
         final parts = <String>[];
@@ -274,14 +288,14 @@ class DnsResourceRecord extends SelfCodec {
         return parts.join('');
 
       case typeIp4:
-      // A record: data is 4 bytes representing IPv4 address
+        // A record: data is 4 bytes representing IPv4 address
         if (data.length == 4) {
           return '${data[0]}.${data[1]}.${data[2]}.${data[3]}';
         }
         return 'Invalid A record data';
 
       case typeIp6:
-      // AAAA record: data is 16 bytes representing IPv6 address
+        // AAAA record: data is 16 bytes representing IPv6 address
         if (data.length == 16) {
           final ip = IpAddress.fromBytes(data);
           return ip.toString();
@@ -291,15 +305,14 @@ class DnsResourceRecord extends SelfCodec {
       case typeCanonicalName:
       case typeNameServer:
       case typeDomainNamePointer:
-      // These contain domain names in the data, which may need parsing similar to _readDnsName.
-      // If needed, implement parsing logic (currently the data might already have been read).
-      // For simplicity, assume data is raw domain name string if needed.
-      // Often, these are returned in the `nameParts` if the server returns them as answers.
-      // If you need to decode from 'data' for these, implement a name decoder similar to the question decoding.
-        return 'Domain name (CNAME/NS/PTR) not implemented';
-
+        // CNAME/NS/PTR: data is a domain name
+        // We have decoded it to a fully expanded string in Item.decodeSelf()
+        if (data.isNotEmpty) {
+          return utf8.decode(data);
+        }
+        return 'Invalid domain name data';
       default:
-      // For other types, just return a hex string or raw bytes for now.
+        // For other types, just return a hex string or raw bytes for now.
         return 'Raw data: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}';
     }
   }
@@ -525,6 +538,7 @@ enum DnsRecordType {
   ptr(12),
   mg(14),
   caa(257);
+
   final int value;
   const DnsRecordType(this.value);
   factory DnsRecordType.fromInt(int value) {
@@ -585,8 +599,8 @@ enum DnsRecordType {
     }
   }
 }
-class DnsQuestion extends SelfCodec {
 
+class DnsQuestion extends SelfCodec {
   static String stringFromType(DnsRecordType type) {
     switch (type) {
       case DnsRecordType.a:
@@ -648,8 +662,7 @@ class DnsQuestion extends SelfCodec {
   }
 
   @override
-  void encodeSelf(RawWriter writer,
-      {int startIndex = 0, Map<String, int>? pointers}) {
+  void encodeSelf(RawWriter writer, {int startIndex = 0, Map<String, int>? pointers}) {
     // Write name
     _writeDnsName(
       writer,
